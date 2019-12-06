@@ -64,23 +64,22 @@ static void CalcEffectiveDims(vector<int64_t>& x_dims, vector<int64_t>& y_dims) 
 }
 
 Status Expand::ComputeInternal(OpKernelContext* ctx) const {
-  const auto& input0 = *ctx->Input<Tensor>(0);
-  const auto& input1 = *ctx->Input<Tensor>(1);
+  const auto& input_data_tensor = *ctx->Input<Tensor>(0);
+  const auto& input_shape_tensor = *ctx->Input<Tensor>(1);
 
   // new shape to be expanded to
-  const auto* p_shape = input1.template Data<int64_t>();
-  std::vector<int64_t> output_dims{p_shape, p_shape + input1.Shape().Size()};
+  const auto* p_shape = input_shape_tensor.template Data<int64_t>();
+  std::vector<int64_t> output_dims{p_shape, p_shape + input_shape_tensor.Shape().Size()};
   TensorShape output_shape(output_dims);
 
-  ORT_RETURN_IF_ERROR(ComputeOutputShape(Node().Name(), input0.Shape(), output_dims, output_shape));
+  ORT_RETURN_IF_ERROR(ComputeOutputShape(Node().Name(), input_data_tensor.Shape(), output_dims, output_shape));
   auto& output_tensor = *ctx->Output(0, output_shape);
-  
   if (0 == output_shape.Size()) {
     return Status::OK();
   }
 
   output_dims = output_shape.GetDims();
-  auto input_dims = input0.Shape().GetDims();
+  auto input_dims = input_data_tensor.Shape().GetDims();
 
   CalcEffectiveDims(input_dims, output_dims);
   int rank = gsl::narrow_cast<int>(output_dims.size());
@@ -94,17 +93,16 @@ Status Expand::ComputeInternal(OpKernelContext* ctx) const {
     if (input_dims[i] == 1) input_view_strides.CpuSpan()[i] = 0;
   }
 
-  ExpandImpl(
-      input0.DataType()->Size(),
+  return ExpandImpl(
+      input_data_tensor.DataType()->Size(),
       gsl::narrow_cast<int>(output_shape.Size()),
-      gsl::narrow_cast<int>(input0.Shape().Size()),
-      input0.DataRaw(),
+      gsl::narrow_cast<int>(input_data_tensor.Shape().Size()),
+      input_data_tensor.DataRaw(),
       output_tensor.MutableDataRaw(),
       fdm_output_strides,
       input_view_strides);
-
-  return Status::OK();
 }
+
 
 ONNX_OPERATOR_KERNEL_EX(
     Expand,
