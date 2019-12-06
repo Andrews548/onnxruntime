@@ -136,6 +136,41 @@ struct NearestMappingInfo {
 };
 
 template <typename T>
+__global__ void _ResizeNearestMappingKernel2D(
+    const int input_height, const int input_width,
+    const int output_height, const int output_width,
+    const float scales_height, const float scales_width,
+    const float roi_start_height, const float roi_end_height,
+    const float roi_start_width, const float roi_end_width,
+    const bool extrapolation_enabled,
+    CudaFunctionOriginalCoordinate transform_coordinate,
+    CudaFunctionNearestPixel calc_nearest_pixel,
+    NearestMappingInfo* dims_mapping) {
+  CALCULATE_ELEMENTWISE_INDEX_OR_EXIT(id, input_height + input_width);
+
+  if (id >= 0 && id < output_height) {  // for Height
+    int dim = id;
+    float orig_coord = transform_coordinate(static_cast<float>(dim), scales_height, static_cast<float>(output_height),
+                                            static_cast<float>(input_height), roi_start_height, roi_end_height);
+    dims_mapping[id].extrapolate_ = (int)(extrapolation_enabled && (orig_coord < 0.f || orig_coord > static_cast<float>(input_height - 1)));
+    dim = calc_nearest_pixel(orig_coord, scales_height < 1);
+    if (dim >= input_height) dim = input_height - 1;
+    if (dim < 0) dim = 0;
+    dims_mapping[id].origin_ = dim;
+  } else {
+    int dim = id - output_height;
+    float orig_coord = transform_coordinate(static_cast<float>(dim), scales_width, static_cast<float>(output_width),
+                                            static_cast<float>(input_width), roi_start_width, roi_end_width);
+    dims_mapping[id].extrapolate_ = (int)(extrapolation_enabled && (orig_coord < 0.f || orig_coord > static_cast<float>(input_width - 1)));
+    dim = calc_nearest_pixel(orig_coord, scales_width < 1);
+    if (dim >= input_width) dim = input_width - 1;
+    if (dim < 0) dim = 0;
+    dims_mapping[id].origin_ = dim;
+    return;
+  }
+}
+
+template <typename T>
 __global__ void _ResizeNearestMappingKernel(
     const size_t rank,
     const int64_t* input_shape,
@@ -170,6 +205,40 @@ __global__ void _ResizeNearestMappingKernel(
     dim_sum += output_shape[axis];
   }
 }
+
+template <typename T>
+__global__ void _ResizeNearestKernel2D(
+  const int64_t input_height, const int64_t input_width,
+  const int64_t output_height, const int64_t output_width,
+    const int64_t input_strides_image, const int input_strides_row,
+    const fast_divmod output_stride_image, const fast_divmod output_stride_row,
+    const T* input_data,
+    T* output_data,
+    const size_t N,
+    const T extrapolation_value,
+    CudaFunctionOriginalCoordinate transform_coordinate,
+    CudaFunctionNearestPixel calc_nearest_pixel,
+    const NearestMappingInfo* dims_mapping) {
+  CALCULATE_ELEMENTWISE_INDEX_OR_EXIT(id, N);
+
+  int output_index = static_cast<int>(id);
+  int input_index = 0;
+  int extrapolation_occured = 0;
+
+  int imageid, h, w;
+  output_stride_image.divmod(output_index, imageid, output_index);
+  input_index += input_strides_image * imageid;
+
+  input_strides_row.divmod(output_index, h, w);
+  extrapolation_occured += dims_mapping[h].extrapolate_;
+  input_index += input_strides_row * dims_mapping[h].origin_;
+
+  extrapolation_occured += dims_mapping[output_height + w].extrapolate_;
+  input_index += dims_mapping[output_height + w].origin_;
+
+  output_data[id] = extrapolation_occured ? extrapolation_value : input_data[input_index];
+}
+
 
 template <typename T>
 __global__ void _ResizeNearestKernel(
@@ -403,8 +472,17 @@ void ResizeNearestImpl(
     CudaFunctionNearestPixel calc_nearest_pixel,
     int64_t* prefix_dim_sum,
     NearestMappingInfo* dims_mapping) {
-
   int blocksPerGrid = (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock));
+
+  bool could2d = (rank >= 2 && 
+                  transform_coordinate != GetDeviceOriginalCoordinateFunc(ResizeCoordinateTransformationMode::TF_CROP_AND_RESIZE &&
+                    std::all_of(scales_vals.CpuPtr(), scales_vals.CpuPtr() + (rank-2), [](float v) {
+    return v == 1.0; })
+                  );
+  if (could2d) {
+
+  }
+
   fast_divmod div_output_image = (rank > 2) ? output_div_pitches.CpuPtr()[rank - 3] : fast_divmod(gsl::narrow_cast<int>(N));
   int64_t output_height = output_shape.CpuPtr()[rank - 2];
   int64_t output_width = output_shape.CpuPtr()[rank - 1];
@@ -431,7 +509,7 @@ void ResizeNearestImpl(
       transform_coordinate, calc_nearest_pixel,
       reinterpret_cast<const int64_t*>(dims_mapping),
       reinterpret_cast<const NearestMappingInfo*>(reinterpret_cast<int64_t*>(dims_mapping) + rank));
-  return;      
+  return;
 }
 
 template <typename T>
@@ -473,12 +551,12 @@ void ResizeImpl(
   switch (upsample_mode) {
     case UpsampleMode::NN:
       ResizeNearestImpl(
-        rank, input_shape, output_shape, input_strides, output_div_pitches,
-        scales_vals, roi_vals, input_data, output_data, N,
-        extrapolation_enabled, extrapolation_value, cubic_coeff_a,
-        transform_coordinate, calc_nearest_pixel,
-        reinterpret_cast<int64_t*>(dims_mapping),
-        reinterpret_cast<NearestMappingInfo*>(reinterpret_cast<int64_t*>(dims_mapping) + rank));
+          rank, input_shape, output_shape, input_strides, output_div_pitches,
+          scales_vals, roi_vals, input_data, output_data, N,
+          extrapolation_enabled, extrapolation_value, cubic_coeff_a,
+          transform_coordinate, calc_nearest_pixel,
+          reinterpret_cast<int64_t*>(dims_mapping),
+          reinterpret_cast<NearestMappingInfo*>(reinterpret_cast<int64_t*>(dims_mapping) + rank));
       return;
     case UpsampleMode::LINEAR:
       _ResizeBilinearCoordinateMapping<T><<<blocksPerDimsMappingGrid, 32, 0>>>(
