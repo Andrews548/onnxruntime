@@ -10,7 +10,7 @@ namespace cuda {
 
 template <typename T>
 __global__ void ExpandKernel2D(
-    const size_t N,
+    const int N,
     const T* input_data,
     T* output_data,
     const fast_divmod fdm_output_stride0, 
@@ -26,8 +26,7 @@ __global__ void ExpandKernel2D(
 template <typename T>
 __global__ void ExpandKernel(
   const size_t rank,
-  const size_t N,
-  const size_t N_input,
+  const int N,
   const void* input_data,
   void* output_data,
   const fast_divmod* fdm_output_strides,
@@ -44,16 +43,16 @@ __global__ void ExpandKernel(
 
 Status ExpandByFill(const size_t element_size, const int N, const void* input_data, void* output_data)
 {
-#define CASE(TYPE)                                                                                          \
+#define FILLON(TYPE)                                                                                          \
   case sizeof(TYPE):                                                                                        \
     cuda::Fill(reinterpret_cast<TYPE*>(output_data), *(reinterpret_cast<const TYPE*>(input_data)), N);  \
     break
 
   switch (element_size) {
-    CASE(int8_t);
-    CASE(int16_t);
-    CASE(int32_t);
-    CASE(int64_t);
+    FILLON(int8_t);
+    FILLON(int16_t);
+    FILLON(int32_t);
+    FILLON(int64_t);
     default:
       return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Type not supported for Expand operator");
   }
@@ -62,25 +61,25 @@ Status ExpandByFill(const size_t element_size, const int N, const void* input_da
 
 Status Expand2D(
   const size_t element_size,    
-  const size_t N,
-  const T* input_data,
-  T* output_data,
+  const int N,
+  const void* input_data,
+  void* output_data,
   const fast_divmod fdm_output_stride0, 
   const int input_view_stride0,
   const int input_view_stride1) {
-#define CASE(TYPE)                                                                                          \
+#define EXPAND2D_ON(TYPE)                                                                                          \
     case sizeof(TYPE):                                                                                        \
       ExpandKernel2D<<<blocksPerGrid, GridDim::maxThreadsPerBlock, 0>>>( \
-        element_size, N, reinterpret_cast<TYPE*>(output_data), \
-                    *(reinterpret_cast<const TYPE*>(input_data)), fdm_output_stride0, input_view_stride0, input_view_stride1);  \
+        N, *(reinterpret_cast<const TYPE*>(input_data)), reinterpret_cast<TYPE*>(output_data), \
+	fdm_output_stride0, input_view_stride0, input_view_stride1);  \
       break
 
   int blocksPerGrid = (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock));
   switch (element_size) {
-    CASE(int8_t);
-    CASE(int16_t);
-    CASE(int32_t);
-    CASE(int64_t);
+    EXPAND2D_ON(int8_t);
+    EXPAND2D_ON(int16_t);
+    EXPAND2D_ON(int32_t);
+    EXPAND2D_ON(int64_t);
     default:
       return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Type not supported for Expand operator");
   }
@@ -93,13 +92,13 @@ Status ExpandImpl(
   const int N_input,
   const void* input_data,
   void* output_data,
-  CudaAsyncBuffer<fast_divmod>& fdm_output_strides, 
-  CudaAsyncBuffer<int64_t>& input_view_strides)
+  CudaKernel::CudaAsyncBuffer<fast_divmod>& fdm_output_strides, 
+  CudaKernel::CudaAsyncBuffer<int64_t>& input_view_strides)
 {
-  int rank = static_cast<int>(fdm_output_strides.Count());
+  const int rank = static_cast<int>(fdm_output_strides.Count());
   if (rank == 1) {
     if (N_input == N_output) {
-      CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(output_data, input_data, N * element_size, cudaMemcpyDeviceToDevice, 0);
+      CUDA_RETURN_IF_ERROR(cudaMemcpyAsync(output_data, input_data, N * element_size, cudaMemcpyDeviceToDevice, 0));
     }
     else { // N_input == 1
       return ExpandByFill(element_size, N_output, input_data, output_data);
@@ -107,24 +106,25 @@ Status ExpandImpl(
   }
   else if (rank == 2) {
     return Expand2D(element_size, N_output, input_data, output_data,
-      fdm_output_dims.CpuSpan()[0], input_view_strides.CpuSpan[0], input_view_strides.CpuSpan()[1]);
+      fdm_output_strides.CpuSpan()[0], 
+      input_view_strides.CpuSpan[0], input_view_strides.CpuSpan()[1]);
   }
 
   int blocksPerGrid = (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock));
   fdm_output_strides.CopyToGpu();
   input_view_strides.CopyToGpu();
-  #define CASE(TYPE)                                                                                          \
+  #define EXPAND_ON(TYPE)                                                                                          \
     case sizeof(TYPE):                                                                                        \
       ExpandKernel<<<blocksPerGrid, GridDim::maxThreadsPerBlock, 0>>>( \
-        rank, N, reinterpret_cast<TYPE*>(output_data), *(reinterpret_cast<const TYPE*>(input_data)), \
+        rank, N_output, *(reinterpret_cast<const TYPE*>(input_data)), reinterpret_cast<TYPE*>(output_data), \
         fdm_output_strides.GpuPtr(), input_view_strides.GpuPtr());  \
       break
 
   switch (element_size) {
-    CASE(int8_t);
-    CASE(int16_t);
-    CASE(int32_t);
-    CASE(int64_t);
+    EXPAND_ON(uint8_t);
+    EXPAND_ON(uint16_t);
+    EXPAND_ON(uint32_t);
+    EXPAND_ON(uint64_t);
     default:
       return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Type not supported for Expand operator");
   }

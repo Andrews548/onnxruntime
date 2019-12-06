@@ -6,6 +6,7 @@
 #include "core/providers/cuda/shared_inc/cuda_utils.h"
 #include "core/framework/data_types.h"
 #include "core/common/common.h"
+#include "core/providers/cuda/cuda_common.h"
 
 namespace onnxruntime {
 namespace cuda {
@@ -16,8 +17,8 @@ Status ExpandImpl(
     const int N_input,
     const void* input_data,
     void* output_data,
-    CudaAsyncBuffer<fast_divmod>& fdm_output_strides, 
-    CudaAsyncBuffer<int64_t>& input_view_strides);
+    CudaKernel::CudaAsyncBuffer<fast_divmod>& fdm_output_strides, 
+    CudaKernel::CudaAsyncBuffer<int64_t>& input_view_strides);
 
 
 }  // namespace cuda

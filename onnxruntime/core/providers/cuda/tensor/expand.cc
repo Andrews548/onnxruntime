@@ -11,7 +11,7 @@ namespace onnxruntime {
 namespace cuda {
 
 // Logically expanded y could just be a view of x.
-static void CalcEffectiveDimes(vector<int64_t>& x_dims, const vector<int64_t>& y_dims) {
+static void CalcEffectiveDims(vector<int64_t>& x_dims, vector<int64_t>& y_dims) {
   vector<int64_t> x_reverse;
   vector<int64_t> y_reverse;
 
@@ -83,13 +83,13 @@ Status Expand::ComputeInternal(OpKernelContext* ctx) const {
   auto input_dims = input0.Shape().GetDims();
 
   CalcEffectiveDims(input_dims, output_dims);
-  auto rank = output_dims.NumDimensions();
+  int rank = gsl::narrow_cast<int>(output_dims.size());
 
   CudaAsyncBuffer<fast_divmod> fdm_output_strides(this, rank);
   ORT_ENFORCE(CalculateFdmStrides(fdm_output_strides.CpuSpan(), output_dims));
 
   CudaAsyncBuffer<int64_t> input_view_strides(this, rank);
-  TensorPitches::Calculate(input_view_strides.CpuSpan(), input_dims.GetDims());
+  TensorPitches::Calculate(input_view_strides.CpuSpan(), input_dims);
   for (int i = 0; i < rank; ++i) {
     if (input_dims[i] == 1) input_view_strides.CpuSpan()[i] = 0;
   }
