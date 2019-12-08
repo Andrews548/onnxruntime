@@ -208,30 +208,20 @@ __global__ void _ResizeNearestMappingKernel(
 
 template <typename T>
 __global__ void _ResizeNearestKernel2D(
-  const int64_t input_height, const int64_t input_width,
-  const int64_t output_height, const int64_t output_width,
-    const int64_t input_strides_image, const int input_strides_row,
+    const int64_t output_height, const int64_t output_width,
+    const int64_t input_stride_image, const int input_stride_row,
     const fast_divmod output_stride_image, const fast_divmod output_stride_row,
-    const T* input_data,
-    T* output_data,
-    const size_t N,
-    const T extrapolation_value,
-    CudaFunctionOriginalCoordinate transform_coordinate,
-    CudaFunctionNearestPixel calc_nearest_pixel,
-    const NearestMappingInfo* dims_mapping) {
+    const T* input_data, T* output_data, const size_t N,
+    const T extrapolation_value, const NearestMappingInfo* dims_mapping) {
   CALCULATE_ELEMENTWISE_INDEX_OR_EXIT(id, N);
 
-  int output_index = static_cast<int>(id);
-  int input_index = 0;
-  int extrapolation_occured = 0;
+  int imageid, h, w, output_index;
+  output_stride_image.divmod(static_cast<int>(id), imageid, output_index);
+  int input_index = input_stride_image * imageid;
 
-  int imageid, h, w;
-  output_stride_image.divmod(output_index, imageid, output_index);
-  input_index += input_strides_image * imageid;
-
-  input_strides_row.divmod(output_index, h, w);
-  extrapolation_occured += dims_mapping[h].extrapolate_;
-  input_index += input_strides_row * dims_mapping[h].origin_;
+  output_stride_row.divmod(output_index, h, w);
+  int extrapolation_occured = dims_mapping[h].extrapolate_;
+  input_index += input_stride_row * dims_mapping[h].origin_;
 
   extrapolation_occured += dims_mapping[output_height + w].extrapolate_;
   input_index += dims_mapping[output_height + w].origin_;
@@ -474,20 +464,40 @@ void ResizeNearestImpl(
     NearestMappingInfo* dims_mapping) {
   int blocksPerGrid = (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock));
 
-  bool could2d = (rank >= 2 && 
-                  transform_coordinate != GetDeviceOriginalCoordinateFunc(ResizeCoordinateTransformationMode::TF_CROP_AND_RESIZE &&
-                    std::all_of(scales_vals.CpuPtr(), scales_vals.CpuPtr() + (rank-2), [](float v) {
-    return v == 1.0; })
-                  );
-  if (could2d) {
+  bool could2d = rank >= 2 && 
+                 transform_coordinate != GetDeviceOriginalCoordinateFunc(ResizeCoordinateTransformationMode::TF_CROP_AND_RESIZE) &&
+                 std::all_of(scales_vals.CpuPtr(), scales_vals.CpuPtr() + (rank-2), [](float v) { return v == 1.0; } );
 
-  }
-
-  fast_divmod div_output_image = (rank > 2) ? output_div_pitches.CpuPtr()[rank - 3] : fast_divmod(gsl::narrow_cast<int>(N));
-  int64_t output_height = output_shape.CpuPtr()[rank - 2];
-  int64_t output_width = output_shape.CpuPtr()[rank - 1];
   int64_t total_dim_sum = std::accumulate(output_shape.CpuPtr(), output_shape.CpuPtr() + rank, 0);
   int blocksPerDimsMappingGrid = (int)(ceil(static_cast<double>(total_dim_sum) / 32));
+
+  if (could2d) {
+    int64_t output_height = output_shape.CpuPtr()[rank - 2];
+    int64_t output_width = output_shape.CpuPtr()[rank - 1];
+    fast_divmod div_output_image = (rank > 2) ? output_div_pitches.CpuPtr()[rank - 3] : fast_divmod(output_height * output_width);
+    blocksPerDimsMappingGrid = (int)(ceil(static_cast<double>(output_height + output_width) / 32));
+
+    _ResizeNearestMappingKernel2D<T><<<blocksPerDimsMappingGrid, 32, 0>>>(
+        input_shape.CpuPtr()[rank-2], input_shape.CpuPtr()[rank-1], 
+        output_height, output_width,
+        scales_vals.CpuPtr()[rank-2], scales_vals.CpuPtr()[rank-1],
+        roi_vals.CpuPtr()[rank-2], roi_vals.CpuPtr()[rank-2+rank],
+        roi_vals.CpuPtr()[rank-1], roi_vals.CpuPtr()[rank-1+rank],
+        extrapolation_enabled, transform_coordinate, calc_nearest_pixel,
+        dims_mapping);
+
+
+    _ResizeNearestKernel2D<T><<<blocksPerGrid, GridDim::maxThreadsPerBlock, 0>>>(
+      output_height, output_width,
+      input_shape.CpuPtr()[rank-2] * input_shape.CpuPtr()[rank-1], input_shape.CpuPtr()[rank-2],
+      div_output_image, output_div_pitches.CpuPtr()[rank-2],
+      input_data, output_data, N,
+      static_cast<T>(extrapolation_value),
+      dims_mapping);
+
+    return;
+  }
+
     
   input_shape.CopyToGpu();
   output_shape.CopyToGpu();
