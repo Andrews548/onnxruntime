@@ -79,7 +79,13 @@
 #define BACKEND_OPENBLAS ""
 #endif
 
-#define BACKEND_DEVICE BACKEND_PROC BACKEND_DNNL BACKEND_MKLML BACKEND_NGRAPH BACKEND_OPENVINO BACKEND_NUPHAR BACKEND_OPENBLAS
+#ifdef USE_ARMNN
+#define BACKEND_ARMNN "-ARMNN"
+#else
+#define BACKEND_ARMNN ""
+#endif
+
+#define BACKEND_DEVICE BACKEND_PROC BACKEND_DNNL BACKEND_MKLML BACKEND_NGRAPH BACKEND_OPENVINO BACKEND_NUPHAR BACKEND_OPENBLAS BACKEND_ARMNN
 #include "core/session/onnxruntime_cxx_api.h"
 #include "core/providers/providers.h"
 #include "core/providers/cpu/cpu_execution_provider.h"
@@ -107,6 +113,9 @@ std::string nuphar_settings;
 #ifdef USE_BRAINSLICE
 #include "core/providers/brainslice/brainslice_provider_factory.h"
 #endif
+#ifdef USE_ARMNN
+#include "core/providers/armnn/armnn_provider_factory.h"
+#endif
 
 namespace onnxruntime {
 std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_CPU(int use_arena);
@@ -117,6 +126,7 @@ std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_NGraph
 std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_OpenVINO(const char* device);
 std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Nuphar(bool, const char*);
 std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_BrainSlice(uint32_t ip, int, int, bool, const char*, const char*, const char*);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_ARMNN(int use_arena);
 }  // namespace onnxruntime
 
 #if defined(_MSC_VER)
@@ -265,7 +275,7 @@ inline void RegisterExecutionProvider(InferenceSession* sess, onnxruntime::IExec
 const std::vector<std::string>& GetAllProviders() {
   static std::vector<std::string> all_providers = {kTensorrtExecutionProvider, kCudaExecutionProvider, kDnnlExecutionProvider,
                                                    kNGraphExecutionProvider, kOpenVINOExecutionProvider, kNupharExecutionProvider,
-                                                   kBrainSliceExecutionProvider, kCpuExecutionProvider};
+                                                   kBrainSliceExecutionProvider, kCpuExecutionProvider, kArmnnExecutionProvider};
   return all_providers;
 }
 
@@ -292,6 +302,9 @@ const std::vector<std::string>& GetAvailableProviders() {
 #endif
 #ifdef USE_BRAINSLICE
     available_providers.push_back(kBrainSliceExecutionProvider);
+#endif
+#ifdef USE_ARMNN
+    available_providers.push_back(kArmnnExecutionProvider);
 #endif
     return available_providers;
   };
@@ -332,6 +345,10 @@ void RegisterExecutionProviders(InferenceSession* sess, const std::vector<std::s
     } else if (type == kBrainSliceExecutionProvider) {
 #ifdef USE_BRAINSLICE
       RegisterExecutionProvider(sess, *onnxruntime::CreateExecutionProviderFactory_BrainSlice(0, -1, -1, false, "", "", ""));
+#endif
+    } else if (type == kArmnnExecutionProvider) {
+#ifdef USE_ARMNN
+      RegisterExecutionProvider(sess, *onnxruntime::CreateExecutionProviderFactory_ARMNN(0));
 #endif
     } else {
       // unknown provider

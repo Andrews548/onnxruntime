@@ -691,7 +691,7 @@ void OpTester::Run(
         kDnnlExecutionProvider, kNGraphExecutionProvider,
         kNupharExecutionProvider, kTensorrtExecutionProvider,
         kOpenVINOExecutionProvider, kDmlExecutionProvider,
-        kAclExecutionProvider,
+        kAclExecutionProvider, kArmnnExecutionProvider,
     };
 
     bool has_run = false;
@@ -757,6 +757,8 @@ void OpTester::Run(
           execution_provider = DefaultNnapiExecutionProvider();
         else if (provider_type == onnxruntime::kAclExecutionProvider)
           execution_provider = DefaultAclExecutionProvider();
+        else if (provider_type == onnxruntime::kArmnnExecutionProvider)
+          execution_provider = DefaultArmnnExecutionProvider();
         // skip if execution provider is disabled
         if (execution_provider == nullptr)
           continue;

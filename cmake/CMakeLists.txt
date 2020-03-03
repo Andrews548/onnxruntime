@@ -91,6 +91,7 @@ option(onnxruntime_DEBUG_NODE_INPUTS_OUTPUTS "Dump node input shapes and output 
 option(onnxruntime_USE_DML "Build with DirectML support" OFF)
 option(onnxruntime_USE_WINML "Build with WinML support" OFF)
 option(onnxruntime_USE_ACL "Build with ACL support" OFF)
+option(onnxruntime_USE_ARMNN "Build with ArmNN support" OFF)
 option(onnxruntime_ENABLE_INSTRUMENT "Enable Instrument with Event Tracing for Windows (ETW)" OFF)
 option(onnxruntime_USE_TELEMETRY "Build with Telemetry" OFF)
 option(onnxruntime_ENABLE_WCOS "Build for Windows Core OS" OFF)
@@ -439,6 +440,11 @@ set(onnxruntime_EXTERNAL_DEPENDENCIES onnx_proto)
 # ACL
 if (onnxruntime_USE_ACL)
   list(APPEND onnxruntime_EXTERNAL_LIBRARIES arm_compute acl arm_compute_graph arm_compute_core)
+endif()
+
+# ARMNN
+if (onnxruntime_USE_ARMNN)
+  list(APPEND onnxruntime_EXTERNAL_LIBRARIES armnn pthread arm_compute_core arm_compute arm_compute_graph)
 endif()
 
 # MKLML

@@ -31,6 +31,7 @@ elif '--use_cuda' in sys.argv:
         package_name = 'ort-gpu-nightly'
         nightly_build = True
         sys.argv.remove('--nightly_build')
+
 elif '--use_ngraph' in sys.argv:
     package_name = 'onnxruntime-ngraph'
     sys.argv.remove('--use_ngraph')
@@ -50,6 +51,10 @@ if '--nightly_build' in sys.argv:
     package_name = 'ort-nightly'
     nightly_build = True
     sys.argv.remove('--nightly_build')
+
+elif '--use_armnn' in sys.argv:
+    package_name = 'onnxruntime-armnn'
+    sys.argv.remove('--use_armnn')
 
 is_manylinux1 = False
 if environ.get('AUDITWHEEL_PLAT', None) == 'manylinux1_x86_64' or environ.get('AUDITWHEEL_PLAT', None) == 'manylinux2010_x86_64' :
